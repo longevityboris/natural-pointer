@@ -13,7 +13,6 @@ uv.lock
 
 # Swift self-test build
 swift/.build/
-swift/selftest
 
 # Editors and macOS
 .vscode/
