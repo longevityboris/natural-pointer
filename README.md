@@ -64,6 +64,7 @@ while true {
 usleep(useconds_t(hand.dwell() * 1_000_000))  // rest as long as the hand did before a click
 ```
 
+`HumanStrokeLibrary(contentsOf:)` throws if the file holds no usable stroke.
 The path is a list of samples about 8 ms apart; `position(at:)` runs straight
 between them, so it can be read at any rate. To slow every move down, read it
 at `elapsed / 1.5`.
@@ -74,7 +75,7 @@ same path. To check:
 ```bash
 swiftc -O swift/HumanStroke.swift swift/SelfTest/main.swift -o swift/.build/selftest
 swift/.build/selftest natural_pointer/data/strokes.json swift/SelfTest/fixtures.json
-# ok: 36 paths, 1090 points match Python (largest difference 0.0)
+# ok: 45 paths, 1276 points match Python (largest difference 0.0)
 ```
 
 ## How it works
@@ -90,58 +91,59 @@ swift/.build/selftest natural_pointer/data/strokes.json swift/SelfTest/fixtures.
    the screen edges, at least 0.75 as straight as its chord, never more than 8%
    behind its start, 30% past its end or 25% to the side.
 3. **Store.** Each stroke is turned so that it starts at (0, 0) and ends on the
-   +x axis. `strokes.json` holds 241 of them in 147 kB, as whole numbers
+   +x axis. `strokes.json` holds 240 of them in 146 kB, as whole numbers
    (0.1 ms, 0.1 point).
 4. **Replay.** For a request, every stroke is scored on how far its length and
    direction are from what is asked; one of the six best is picked at random,
    never one of the last four used. It is scaled and turned onto start -> end.
    Three small random changes keep two replays of one stroke from matching:
    pace (-7% to +9%), where in time the speed peaks, and bow (±15%). The first
-   point is the start and the last is exactly the end.
+   point is the start and the last is exactly the end. Given a screen size, a
+   path between two points on that screen is kept on it.
 
 ## What the recording shows
 
 `mouse_data.json` is 512 seconds of one person using a mouse on an 1800 × 1169
-point screen: 11,788 move reports at 125 Hz, 83 clicks. It yields 297 strokes,
-of which 241 pass cleaning. Reproduce every number here with
+point screen: 11,788 move reports at 125 Hz, 83 clicks. It yields 296 strokes,
+of which 240 pass cleaning. Reproduce every number here with
 `python scripts/analyze.py` (results in `docs/stats.json`).
 
 | | 10th percentile | median | 90th percentile |
 |---|---|---|---|
-| Distance (points) | 19 | 207 | 586 |
-| Duration (s) | 0.13 | 0.24 | 0.65 |
-| Peak speed (points/s) | 239 | 1,787 | 6,251 |
-| When speed peaks (share of the stroke's time) | 0.13 | 0.39 | 0.68 |
+| Distance (points) | 20 | 208 | 586 |
+| Duration (s) | 0.11 | 0.23 | 0.65 |
+| Peak speed (points/s) | 238 | 1,805 | 6,252 |
+| When speed peaks (share of the stroke's time) | 0.13 | 0.35 | 0.63 |
 | Straightness (chord / path length) | 0.89 | 0.98 | 1.00 |
 | Bow (largest sideways drift / distance) | 0.02 | 0.05 | 0.13 |
-| Sideways tremor (points, rms) | 0.08 | 0.25 | 0.93 |
-| Rest on the target before a click (s) | 0.016 | 0.037 | 0.19 |
+| Sideways tremor (points, rms) | 0.09 | 0.25 | 0.94 |
+| Rest on the target before a click (s) | 0.016 | 0.041 | 0.18 |
 | Button held (s) | 0.087 | 0.112 | 0.151 |
-| Rest between strokes (s) | 0.03 | 0.31 | 2.1 |
+| Rest between strokes (s) | 0.04 | 0.29 | 2.1 |
 
 **Time barely depends on distance.** The textbook law (Fitts) says longer
-moves take longer. Here the fit `duration = -0.010 + 0.048 · log2(1 + distance)`
-explains 12% of the variance. What scales is speed: peak speed grows as
+moves take longer. Here the fit `duration = -0.070 + 0.054 · log2(1 + distance)`
+explains 15% of the variance. What scales is speed: peak speed grows as
 distance^0.91 (R² 0.93). A 600-point move and a 60-point move both take about
 a quarter of a second; the long one is simply ten times faster. A glide whose
 time grows with distance, as most do, is wrong for this hand.
 
 ![Duration and peak speed against distance](docs/distance.png)
 
-**The speed curve is lopsided.** The hand reaches its peak speed 39% of the
+**The speed curve is lopsided.** The hand reaches its peak speed 35% of the
 way through and then trails off. A minimum-jerk curve peaks at exactly 50% and
 is symmetric. One stroke in six has more than one burst of speed (31 have two,
-11 have three), 27% contain a hesitation of 30 ms or more, and 19 end with a
+11 have three), 21% contain a hesitation of 30 ms or more, and 19 end with a
 correction after a full stop.
 
 ![Speed profiles](docs/speed.png)
 
-**It overshoots, sometimes.** 9.5% of strokes run past the target by more than
-2 points (median 14) and come back. The bow goes left of travel 53% of the time
-and right 47%: there is no fixed side.
+**It overshoots, sometimes.** 9.6% of strokes run past the target by more than
+2 points (median 14) and come back. The bow goes left of travel 52% of the time
+and right 48%: there is no fixed side.
 
 **It never stops trembling.** Between 8 and 40 Hz the sideways speed of the
-recorded strokes carries 139 times the power of a minimum-jerk glide of the
+recorded strokes carries 136 times the power of a minimum-jerk glide of the
 same length and time, which has none beyond its rounding. The tremor is small,
 a quarter of a point rms, but it is in every stroke. (Some of that power is
 the mouse's uneven report timing, which replay keeps too.)
@@ -149,7 +151,7 @@ the mouse's uneven report timing, which replay keeps too.)
 ![Spectrum of sideways speed](docs/tremor.png)
 
 Limits worth knowing: this is 8.5 minutes of free use, not a targeting task,
-and only 54 strokes end in a click. Four strokes are longer than 800 points,
+and only 64 strokes end in a click. Four strokes are longer than 800 points,
 so very long moves reuse few strokes, scaled up. Record more and the library
 gets better; nothing else has to change.
 
@@ -171,17 +173,17 @@ The typical step is 2.98 points, so the network has learned little more than
 It also misses the time to the next report by 7 ms, where "always 8 ms" misses
 by 0.2 ms.
 
-| Paths for the same 241 starts and ends (medians) | recorded | `boris.pth` |
+| Paths for the same 240 starts and ends (medians) | recorded | `boris.pth` |
 |---|---|---|
-| Duration | 0.24 s | 1.09 s |
+| Duration | 0.23 s | 1.01 s |
 | Reports | 29 | 14 |
 | Largest single step (share of the distance) | 10% | 56% |
-| Within a tenth of the distance of the target after | 77% of the time | 32% of the time |
+| Within a tenth of the distance of the target after | 75% of the time | 36% of the time |
 
 ![The network against a recorded stroke](docs/model.png)
 
-Its paths cross more than half the distance in one jump, arrive in a third of
-their time, wait, and are then snapped onto the target by the code. The
+Its paths cross more than half the distance in one jump, arrive in about a
+third of their time, wait, and are then snapped onto the target by the code. The
 weights do matter (the same code with untrained weights is far worse), but
 what they add is not movement. With 8.5 minutes of data a model has nothing to
 learn that replay does not already have, exactly. `boris.pth` and

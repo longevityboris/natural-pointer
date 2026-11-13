@@ -37,7 +37,7 @@ class NaturalPointer:
         if method == "stroke":
             try:
                 self.library = StrokeLibrary.load(library_path, seed=seed)
-            except (OSError, ValueError, KeyError) as e:
+            except (OSError, ValueError) as e:
                 print(f"Stroke library not usable ({e}). Using bezier curves.")
                 self.method = "bezier"
 
@@ -66,8 +66,12 @@ class NaturalPointer:
             steps = bezier_path(start[0], start[1], end[0], end[1])
         out, t = [(0.0, float(start[0]), float(start[1]))], 0.0
         for p in steps:
+            if p["time"] <= 0:
+                continue          # the network sometimes guesses a step back in time
             t += p["time"] / 1000.0
             out.append((t, float(p["x"]), float(p["y"])))
+        if len(out) == 1:
+            out.append(out[0])
         out[-1] = (out[-1][0], float(end[0]), float(end[1]))
         return out
 

@@ -1,12 +1,13 @@
 """Turning a recorded stroke onto a new start -> end."""
 
+import json
 import math
 import sys
 
 import pytest
 
 from natural_pointer import NaturalPointer, StrokeLibrary, position_at
-from natural_pointer.strokes import Stroke, _at
+from natural_pointer.strokes import Stroke
 
 
 def test_path_starts_and_ends_exactly_where_asked():
@@ -39,12 +40,11 @@ def test_no_stroke_is_replayed_twice_in_a_row():
 
 def test_the_chosen_stroke_is_of_similar_length_and_direction():
     lib = StrokeLibrary.load(seed=5)
-    by_id = {s.id: s for s in lib.strokes}
     for dist, angle in [(60, 0.0), (300, math.pi / 2), (300, -2.5), (600, 3.0)]:
         end = (900 + dist * math.cos(angle), 600 + dist * math.sin(angle))
         for _ in range(10):
             lib.path((900, 600), end)
-            s = by_id[lib.recent[-1]]
+            s = lib.strokes[lib.recent[-1]]
             assert 0.5 < s.dist / dist < 2.0
             assert abs(math.remainder(s.angle - angle, 2 * math.pi)) < math.pi / 2
 
@@ -80,6 +80,52 @@ def test_the_path_stays_on_the_screen():
             assert 0 <= x <= 799 and 0 <= y <= 599
 
 
+def test_a_move_on_another_display_is_not_squeezed_onto_this_one():
+    for start, end in [((1500, 500), (1400, 520)), ((-500, 300), (-100, 320))]:
+        squeezed, free = StrokeLibrary.load(seed=6), StrokeLibrary.load(seed=6)
+        assert squeezed.path(start, end, screen=(1280, 720)) == free.path(start, end)
+
+
+def test_places_that_are_not_numbers_give_no_path_of_nonsense():
+    lib = StrokeLibrary.load(seed=2)
+    for bad in (math.nan, math.inf, 1e200):
+        path = lib.path((bad, 100), (500, 500))
+        assert len(path) == 2 and path[-1] == (0.0, 500.0, 500.0)
+    assert lib.recent == []                       # no stroke was spent on them
+
+
+def test_duplicate_ids_do_not_run_the_choice_dry():
+    twins = [Stroke(0, 100.0, 0.0, [0.0, 0.1, 0.2], [0.0, 50.0, 100.0], [0.0, 2.0, 0.0]) for _ in range(2)]
+    lib = StrokeLibrary(twins, seed=1)
+    for _ in range(5):
+        assert lib.path((0, 0), (80, 10))[-1][1:] == (80.0, 10.0)
+    assert lib.recent in ([0], [1])
+
+
+def test_load_refuses_a_file_with_nothing_to_replay(tmp_path):
+    good = {"id": 0, "angle": 0, "t": [0, 1000, 2000], "a": [0, 500, 1000], "b": [0, 20, 0]}
+    cases = {
+        "empty": {"strokes": []},
+        "list": [1, 2, 3],
+        "backwards": {"strokes": [dict(good, t=[0, 5000, 100])]},
+        "nowhere": {"strokes": [dict(good, a=[0, 500, 0])]},
+        "ragged": {"strokes": [dict(good, b=[0, 20])]},
+        "bare": {"strokes": [{"id": 0}]},
+    }
+    for name, doc in cases.items():
+        file = tmp_path / f"{name}.json"
+        file.write_text(json.dumps(doc))
+        with pytest.raises(ValueError):
+            StrokeLibrary.load(str(file))
+        assert NaturalPointer(library_path=str(file)).method == "bezier", name
+    # one bad stroke does not spoil the rest; a null dwell and a missing fit are fine
+    file = tmp_path / "mixed.json"
+    file.write_text(json.dumps({"strokes": [dict(good, dwell=None), dict(good, id=1, t=[0, 5000, 100])]}))
+    lib = StrokeLibrary.load(str(file), seed=1)
+    assert [s.id for s in lib.strokes] == [0] and lib.strokes[0].dwell is None
+    assert lib.path((0, 0), (50, 0))[-1][1:] == (50.0, 0.0)
+
+
 def test_no_move_and_tiny_moves():
     lib = StrokeLibrary.load(seed=2)
     assert lib.path((5, 5), (5, 5)) == [(0.0, 5.0, 5.0)]
@@ -92,13 +138,15 @@ def test_position_at_runs_straight_between_samples():
     assert position_at(path, 0.05) == pytest.approx((5.0, 0.0))
     assert position_at(path, 0.2) == pytest.approx((10.0, 10.0))
     assert position_at(path, 9) == (10.0, 20.0)
-    assert _at([0.0, 0.0], [1.0, 2.0], [3.0, 4.0], 0.0) == (1.0, 3.0)
+    assert position_at(path, math.nan) == (10.0, 20.0)
+    # a jump (a move too short to be a stroke) is over at once: the end, not the start
+    assert position_at([(0.0, 1.0, 3.0), (0.0, 2.0, 4.0)], 0.0) == (2.0, 4.0)
 
 
 def test_dwell_is_one_of_the_recorded_waits():
     lib = StrokeLibrary.load(seed=4)
     waits = {s.dwell for s in lib.strokes if s.dwell is not None}
-    assert len(waits) > 20
+    assert len(waits) > 20 and max(waits) <= 0.5
     assert all(lib.dwell() in waits for _ in range(30))
 
 

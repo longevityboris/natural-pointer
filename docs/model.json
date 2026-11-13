@@ -24,29 +24,29 @@
  },
  "paths": {
   "recorded strokes": {
-   "duration": 0.241,
+   "duration": 0.226,
    "reports": 29.0,
    "largest_step": 0.1,
    "last_step": 0.006,
-   "arrives": 0.768,
+   "arrives": 0.749,
    "backward_time": 0.0
   },
   "boris.pth": {
-   "duration": 1.086,
+   "duration": 1.013,
    "reports": 14.0,
-   "largest_step": 0.561,
-   "last_step": 0.035,
-   "arrives": 0.315,
+   "largest_step": 0.557,
+   "last_step": 0.023,
+   "arrives": 0.363,
    "backward_time": 0.0
   },
   "the same code with untrained weights": {
-   "duration": 1.975,
+   "duration": 1.991,
    "reports": 14.0,
-   "largest_step": 2.107,
-   "last_step": 0.847,
+   "largest_step": 2.067,
+   "last_step": 0.845,
    "arrives": 1.0,
-   "backward_time": 0.136
+   "backward_time": 0.148
   }
  },
- "trained_vs_untrained_mean_gap_share_of_distance": 0.572
+ "trained_vs_untrained_mean_gap_share_of_distance": 0.561
 }

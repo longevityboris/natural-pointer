@@ -36,6 +36,7 @@ CORRECTION_MAX = 60.0   # ...and no longer than this many points on its own
 REPORT = 0.008         # s between two reports of the recording mouse
 STRAIGHT = 0.75        # start -> end distance / path length below this: not one aimed move
 NEAR_REST = 40.0       # points/s: under a third of a point a report, the hand has all but stopped
+DWELL_MAX = 0.5        # s: a longer wait before a click is a pause to think, not the hand settling
 
 
 @dataclass
@@ -69,7 +70,8 @@ class RawStroke:
 def _runs(events: Sequence[dict], screen: tuple[float, float]):
     """Cut the events into runs of moves with no stop, click or drag inside.
 
-    Yields (times, xs, ys, clicked, dwell). Each run starts from the resting
+    Yields (times, xs, ys, clicked, dwell), or None for a press that ended no
+    run (nothing may be joined across it). Each run starts from the resting
     point the hand left, one report before its first move.
     """
     w, h = screen
@@ -113,6 +115,8 @@ def _runs(events: Sequence[dict], screen: tuple[float, float]):
                 held = False
             if done:
                 yield done
+            elif e.get("pressed"):
+                yield None
             rest = (now, px, py)
         # scroll events carry no movement and never fall inside a run
     done = close()
@@ -133,7 +137,11 @@ def segment(
     strokes: list[RawStroke] = []
     last: Optional[RawStroke] = None
     last_end = 0.0
-    for t, x, y, clicked, dwell in _runs(events, screen):
+    for run in _runs(events, screen):
+        if run is None:
+            last = None
+            continue
+        t, x, y, clicked, dwell = run
         size = math.hypot(x[-1] - x[0], y[-1] - y[0])
         if (
             last is not None
@@ -180,20 +188,26 @@ def _cut_at_rests(s: RawStroke) -> list[RawStroke]:
             j = k
             while j < n - 1 and slow[j]:
                 j += 1
+            # reports k..j are near-still: one piece ends at the first, the next starts from the last
             if k - start >= 4:
                 pieces.append((start, k))
-            start = max(k, j - 1)
+            start = j
             k = j
         else:
             k += 1
     if n - 1 - start >= 4:
         pieces.append((start, n - 1))
-    out = [
-        RawStroke([v - s.t[a] for v in s.t[a:b + 1]], s.x[a:b + 1], s.y[a:b + 1], s.start_time + s.t[a])
-        for a, b in pieces
-    ]
-    if out and pieces[-1][1] == n - 1:
-        out[-1].clicked, out[-1].dwell = s.clicked, s.dwell
+    out = []
+    for a, b in pieces:
+        # A piece starts from the last near-still report before it. If a stop
+        # lies between that report and the next, the stop is not part of the move.
+        lead = min(s.t[a + 1] - s.t[a], REPORT)
+        t = [0.0] + [v - s.t[a + 1] + lead for v in s.t[a + 1:b + 1]]
+        out.append(RawStroke(t, s.x[a:b + 1], s.y[a:b + 1], s.start_time + s.t[a + 1] - lead))
+    if out and s.clicked and all(slow[pieces[-1][1]:]):
+        # only near-still reports lie between the last piece and the press
+        out[-1].clicked = True
+        out[-1].dwell = (s.dwell or 0.0) + s.t[-1] - s.t[pieces[-1][1]]
     return out
 
 
@@ -258,7 +272,7 @@ def normalise(s: RawStroke, id: int) -> Stroke:
         t=[round(v * 1e4) / 1e4 for v in s.t],
         a=[round(v * 10) / 10 for v in a],
         b=[round(v * 10) / 10 for v in b],
-        dwell=None if s.dwell is None else round(s.dwell * 1e4) / 1e4,
+        dwell=round(s.dwell * 1e4) / 1e4 if s.dwell is not None and s.dwell <= DWELL_MAX else None,
     )
     stroke.a[0] = stroke.b[0] = stroke.b[-1] = 0.0
     stroke.a[-1] = stroke.dist
@@ -326,10 +340,10 @@ def describe(s: Stroke) -> dict:
 
 def _at(t: Sequence[float], a: Sequence[float], b: Sequence[float], when: float) -> tuple[float, float]:
     """Position at time ``when``, straight between the two nearest samples."""
+    if not when < t[-1]:          # at or past the end, or not a number: the end
+        return a[-1], b[-1]
     if when <= t[0]:
         return a[0], b[0]
-    if when >= t[-1]:
-        return a[-1], b[-1]
     lo, hi = 0, len(t) - 1
     while hi - lo > 1:
         mid = (lo + hi) // 2
@@ -339,6 +353,15 @@ def _at(t: Sequence[float], a: Sequence[float], b: Sequence[float], when: float)
             hi = mid
     f = (when - t[lo]) / (t[hi] - t[lo]) if t[hi] > t[lo] else 1.0
     return a[lo] + (a[hi] - a[lo]) * f, b[lo] + (b[hi] - b[lo]) * f
+
+
+def _usable(t: Sequence[float], a: Sequence[float], b: Sequence[float]) -> bool:
+    """A stroke can be replayed: time starts at 0 and only runs forward, and it goes somewhere."""
+    return (
+        len(t) >= 2 and len(t) == len(a) == len(b)
+        and t[0] == 0 and all(q > p for p, q in zip(t, t[1:]))
+        and a[-1] > 0
+    )
 
 
 class SplitMix64:
@@ -379,7 +402,7 @@ class StrokeLibrary:
         if seed is None:
             seed = int.from_bytes(os.urandom(8), "little")
         self.rng = SplitMix64(seed)
-        self.recent: list[int] = []
+        self.recent: list[int] = []   # places in ``strokes`` of the last few used
 
     # -- file format --
     # What a reader needs to replay a stroke is whole numbers, so every reader
@@ -412,22 +435,33 @@ class StrokeLibrary:
 
     @classmethod
     def load(cls, path: Optional[str] = None, seed: Optional[int] = None) -> "StrokeLibrary":
+        """Read a library file. Raises ValueError if it holds no usable stroke."""
         with open(path or DEFAULT_LIBRARY) as f:
             doc = json.load(f)
-        strokes = [
-            Stroke(
-                id=s["id"],
-                dist=s["a"][-1] / 10,
-                angle=s["angle"] / 1e4,
-                t=[v / 1e4 for v in s["t"]],
-                a=[v / 10 for v in s["a"]],
-                b=[v / 10 for v in s["b"]],
-                dwell=s["dwell"] / 1e4 if "dwell" in s else None,
-                meta=s.get("meta", {}),
-            )
-            for s in doc["strokes"]
-        ]
-        return cls(strokes, doc.get("fit"), tuple(doc.get("screen", RECORDED_SCREEN)), seed)
+        try:
+            strokes = [
+                Stroke(
+                    id=s["id"],
+                    dist=s["a"][-1] / 10,
+                    angle=s["angle"] / 1e4,
+                    t=[v / 1e4 for v in s["t"]],
+                    a=[v / 10 for v in s["a"]],
+                    b=[v / 10 for v in s["b"]],
+                    dwell=s["dwell"] / 1e4 if s.get("dwell") is not None else None,
+                    meta=s.get("meta", {}),
+                )
+                for s in doc["strokes"]
+                if _usable(s["t"], s["a"], s["b"])
+            ]
+            fit = dict(doc.get("fit") or {})
+            fit.setdefault("a", 0.0)
+            fit.setdefault("b", 0.0)
+            screen = tuple(doc.get("screen", RECORDED_SCREEN))
+        except (KeyError, TypeError, IndexError, AttributeError) as e:
+            raise ValueError(f"not a stroke library: {e!r}") from e
+        if not strokes:
+            raise ValueError("the library holds no usable stroke")
+        return cls(strokes, fit, screen, seed)
 
     # -- retargeting --
 
@@ -443,14 +477,14 @@ class StrokeLibrary:
             cost = abs(math.log(dist / s.dist)) + self.ANGLE_WEIGHT * turn / (math.pi / 2)
             scored.append((cost, i))
         scored.sort()
-        pool = [i for _, i in scored if self.strokes[i].id not in self.recent][: self.CHOICES]
-        stroke = self.strokes[pool[int(self.rng.unit() * len(pool))]]
+        pool = [i for _, i in scored if i not in self.recent][: self.CHOICES]
+        pick = pool[int(self.rng.unit() * len(pool))]
         # never the same stroke twice running, nor any of the last few;
         # always leave at least one stroke to choose from
-        self.recent.append(stroke.id)
+        self.recent.append(pick)
         keep = min(self.RECENT, len(self.strokes) - 1)
         self.recent = self.recent[max(0, len(self.recent) - keep):]
-        return stroke
+        return self.strokes[pick]
 
     def dwell(self) -> float:
         """Seconds to rest on the target before pressing: one of the recorded waits."""
@@ -465,14 +499,20 @@ class StrokeLibrary:
 
         ``t`` is seconds from the start of the move. The first point is
         ``start`` at t = 0 and the last is exactly ``end``. With ``screen``
-        (width, height) the path is kept on the screen, as a real pointer is.
+        (width, height) a path whose two ends are on that screen is kept on
+        it, as a real pointer is; a move on another display is left alone.
         """
         sx, sy = float(start[0]), float(start[1])
         ex, ey = float(end[0]), float(end[1])
         dx, dy = ex - sx, ey - sy
         dist = math.sqrt(dx * dx + dy * dy)
-        if dist < 0.5 or not self.strokes:
-            return [(0.0, sx, sy), (0.0, ex, ey)] if dist > 0 else [(0.0, sx, sy)]
+        if not math.isfinite(dist) or dist < 0.5 or not self.strokes:
+            # nothing to replay: too short to be a stroke, or not a place at all
+            return [(0.0, sx, sy), (0.0, ex, ey)] if dist != 0 else [(0.0, sx, sy)]
+        if screen is not None:
+            w, h = float(screen[0]), float(screen[1])
+            if not (0 <= sx <= w - 1 and 0 <= ex <= w - 1 and 0 <= sy <= h - 1 and 0 <= ey <= h - 1):
+                screen = None
         stroke = self.choose(dist, math.atan2(dy, dx))
 
         # Variety that stays inside what the hand does: a few percent on the
@@ -499,8 +539,8 @@ class StrokeLibrary:
             x = sx + a * cx - b * cy
             y = sy + a * cy + b * cx
             if screen is not None:
-                x = min(max(x, 0.0), float(screen[0]) - 1.0)
-                y = min(max(y, 0.0), float(screen[1]) - 1.0)
+                x = min(max(x, 0.0), w - 1.0)
+                y = min(max(y, 0.0), h - 1.0)
             out.append((when, x, y))
         out[0] = (0.0, sx, sy)
         out[-1] = (out[-1][0], ex, ey)

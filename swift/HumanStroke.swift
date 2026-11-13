@@ -40,8 +40,8 @@ public struct HumanPath {
     /// Where the pointer is `when` seconds into the move, straight between the two nearest samples.
     public func position(at when: Double) -> (x: Double, y: Double) {
         guard let first = t.first, let last = t.last else { return (0, 0) }
+        if !(when < last) { return (x[x.count - 1], y[y.count - 1]) }   // at or past the end, or not a number
         if when <= first { return (x[0], y[0]) }
-        if when >= last { return (x[x.count - 1], y[y.count - 1]) }
         var lo = 0, hi = t.count - 1
         while hi - lo > 1 {
             let mid = (lo + hi) / 2
@@ -80,28 +80,33 @@ public struct HumanStrokeLibrary {
     public let strokes: [HumanStroke]
     public let fitA: Double                // expected seconds for a move of d points: fitA + fitB * log2(1 + d)
     public let fitB: Double
-    public private(set) var recent: [Int] = []
+    public private(set) var recent: [Int] = []   // places in `strokes` of the last few used
     var rng: SplitMix64
 
+    public enum LoadError: Error { case noUsableStroke }
+
     private struct File: Decodable {
-        struct Fit: Decodable { let a: Double; let b: Double }
+        struct Fit: Decodable { let a: Double?; let b: Double? }
         struct Stroke: Decodable { let id: Int; let angle: Int; let dwell: Int?; let t: [Int]; let a: [Int]; let b: [Int] }
-        let fit: Fit
+        let fit: Fit?
         let strokes: [Stroke]
     }
 
+    /// Reads a library file; throws if it holds no usable stroke.
     /// `seed` fixes the choices, for tests; leave it out for a fresh one each launch.
     public init(data: Data, seed: UInt64? = nil) throws {
         let file = try JSONDecoder().decode(File.self, from: data)
         strokes = file.strokes.compactMap { s -> HumanStroke? in
-            guard s.t.count >= 2, s.t.count == s.a.count, s.t.count == s.b.count,
-                  let last = s.a.last, last > 0, let end = s.t.last, end > 0 else { return nil }
+            // usable: time starts at 0 and only runs forward, and the stroke goes somewhere
+            guard s.t.count >= 2, s.t.count == s.a.count, s.t.count == s.b.count, s.t[0] == 0,
+                  zip(s.t, s.t.dropFirst()).allSatisfy({ $1 > $0 }), let last = s.a.last, last > 0 else { return nil }
             return HumanStroke(id: s.id, dist: Double(last) / 10, angle: Double(s.angle) / 1e4,
                                t: s.t.map { Double($0) / 1e4 }, a: s.a.map { Double($0) / 10 },
                                b: s.b.map { Double($0) / 10 }, dwell: s.dwell.map { Double($0) / 1e4 })
         }
-        fitA = file.fit.a
-        fitB = file.fit.b
+        if strokes.isEmpty { throw LoadError.noUsableStroke }
+        fitA = file.fit?.a ?? 0
+        fitB = file.fit?.b ?? 0
         rng = SplitMix64(seed: seed ?? UInt64.random(in: UInt64.min...UInt64.max))
     }
 
@@ -125,17 +130,17 @@ public struct HumanStrokeLibrary {
         }
         scored.sort { $0.cost != $1.cost ? $0.cost < $1.cost : $0.index < $1.index }
         var pool: [Int] = []
-        for entry in scored where !recent.contains(strokes[entry.index].id) {
+        for entry in scored where !recent.contains(entry.index) {
             pool.append(entry.index)
             if pool.count == HumanStrokeLibrary.choices { break }
         }
-        let stroke = strokes[pool[Int(rng.unit() * Double(pool.count))]]
+        let pick = pool[Int(rng.unit() * Double(pool.count))]
         // never the same stroke twice running, nor any of the last few;
         // always leave at least one stroke to choose from
-        recent.append(stroke.id)
+        recent.append(pick)
         let keep = min(HumanStrokeLibrary.recentCount, strokes.count - 1)
         recent = Array(recent[max(0, recent.count - keep)...])
-        return stroke
+        return strokes[pick]
     }
 
     /// Seconds to rest on the target before pressing: one of the recorded waits.
@@ -146,15 +151,22 @@ public struct HumanStrokeLibrary {
     }
 
     /// A timed path from `start` to `end`, in points. The first point is `start` at t = 0 and the
-    /// last is exactly `end`. With `screen` (width, height) the path is kept on the screen.
+    /// last is exactly `end`. With `screen` (width, height) a path whose two ends are on that
+    /// screen is kept on it, as a real pointer is; a move on another display is left alone.
     public mutating func path(from start: (x: Double, y: Double), to end: (x: Double, y: Double),
                               screen: (width: Double, height: Double)? = nil) -> HumanPath {
         let dx = end.x - start.x, dy = end.y - start.y
         let dist = (dx * dx + dy * dy).squareRoot()
-        if dist < 0.5 || strokes.isEmpty {
-            return dist > 0
+        if !dist.isFinite || dist < 0.5 || strokes.isEmpty {
+            // nothing to replay: too short to be a stroke, or not a place at all
+            return dist != 0
                 ? HumanPath(t: [0, 0], x: [start.x, end.x], y: [start.y, end.y], strokeId: -1)
                 : HumanPath(t: [0], x: [start.x], y: [start.y], strokeId: -1)
+        }
+        var screen = screen
+        if let s = screen, !(0 <= start.x && start.x <= s.width - 1 && 0 <= end.x && end.x <= s.width - 1
+                             && 0 <= start.y && start.y <= s.height - 1 && 0 <= end.y && end.y <= s.height - 1) {
+            screen = nil
         }
         let stroke = choose(dist: dist, angle: atan2(dy, dx))
 

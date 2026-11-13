@@ -98,6 +98,50 @@ def test_a_chain_without_a_stop_is_cut_where_the_hand_all_but_stops():
     assert found[1].x[-1] == pytest.approx(150, abs=1)
 
 
+def test_a_stroke_cut_from_a_chain_does_not_begin_with_the_stop_before_it():
+    # out and part of the way back without a stop, a 0.15 s stop, then a correction whose first
+    # report is already 8 points on: the correction is joined, the chain is cut at its near-stops,
+    # and the last piece must not carry the 0.15 s stop as its first interval
+    out = reach(1.0, 100, 100, 500, 100)
+    back = reach(out[-1]["rel_time"], 500, 100, 300, 100)
+    begin = back[-1]["rel_time"] + 0.15
+    fix = [move(begin + i * 0.008, 300 + 8 * (i + 1), 100) for i in range(5)]
+    found = S.segment([move(0.0, 100, 100)] + out + back + fix, SCREEN)
+    assert [round(s.x[-1]) for s in found] == [500, 300, 340]
+    for stroke in found:
+        assert stroke.t[0] == 0 and stroke.t[1] - stroke.t[0] <= S.REPORT + 1e-9
+        assert all(b > a for a, b in zip(stroke.t, stroke.t[1:]))
+    assert found[2].duration == pytest.approx(5 * 0.008)
+
+
+def test_a_click_after_a_chain_stays_with_its_last_stroke():
+    out = reach(1.0, 100, 100, 500, 100)
+    back = reach(out[-1]["rel_time"], 500, 100, 150, 100)
+    end = back[-1]["rel_time"]
+    found = S.segment([move(0.0, 100, 100)] + out + back + [click(end + 0.05, 150, 100, True)], SCREEN)
+    assert [s.clicked for s in found] == [False, True]
+    # the wait runs from where the cut stroke ends (its last near-still reports are part of the wait)
+    assert 0.05 <= found[1].dwell < 0.1
+
+
+def test_nothing_is_joined_across_a_click_that_ended_no_stroke():
+    main = reach(1.0, 100, 100, 500, 100)
+    end = main[-1]["rel_time"]
+    # the stroke is closed by a release (as after a drag), then a bare press, then a small move
+    events = ([move(0.0, 100, 100)] + main + [click(end + 0.02, 500, 100, False), click(end + 0.05, 500, 100, True),
+               click(end + 0.1, 500, 100, False)] + reach(end + 0.15, 500, 100, 510, 100, n=8))
+    assert [s.parts for s in S.segment(events, SCREEN)] == [1, 1]
+
+
+def test_a_long_wait_before_a_click_is_not_a_dwell():
+    main = reach(1.0, 100, 100, 500, 100)
+    end = main[-1]["rel_time"]
+    (stroke,) = S.segment([move(0.0, 100, 100)] + main + [click(end + 20, 500, 100, True)], SCREEN)
+    assert stroke.clicked and stroke.dwell == pytest.approx(20)
+    kept = S.normalise(stroke, 0)
+    assert kept.dwell is None and kept.meta["clicked"]
+
+
 def test_clean_drops_what_cannot_be_retargeted():
     good = S.RawStroke([i * 0.008 for i in range(20)], [100 + 10 * i for i in range(20)], [100.0] * 20)
     tiny = S.RawStroke([i * 0.008 for i in range(20)], [100 + 0.1 * i for i in range(20)], [100.0] * 20)
@@ -135,6 +179,8 @@ def test_the_recording_gives_the_shipped_library():
     assert built == shipped
     assert len(built["strokes"]) > 200
     for s in built["strokes"]:
-        assert s["t"][0] == 0 and s["t"] == sorted(s["t"])
+        assert s["t"][0] == 0 and all(b > a for a, b in zip(s["t"], s["t"][1:]))
+        assert s["t"][1] <= 200            # no stroke begins with a stop
+        assert s.get("dwell", 0) <= 5000
         assert (s["a"][0], s["b"][0], s["b"][-1]) == (0, 0, 0)
         assert s["a"][-1] == round(s["meta"]["dist"] * 10) and s["a"][-1] >= 40

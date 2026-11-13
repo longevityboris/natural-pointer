@@ -30,6 +30,9 @@ CALLS = [
     ((50, 50), (50.2, 50), None),
     ((50, 50), (56, 47), None),
     "dwell",
+    ((1500, 500), (1400, 520), (1280, 720)),      # on another display: not squeezed
+    ((-500, 300), (-100, 320), (1280, 720)),
+    ((1279, 719), (0, 0), (1280, 720)),           # corner to corner
 ]
 
 
@@ -49,7 +52,7 @@ def main():
             probes = [-0.01, 0.0, total * 0.137, total * 0.5, total * 0.912, total, total + 1]
             calls.append({
                 "start": list(start), "end": list(end), "screen": list(screen) if screen else None,
-                "stroke": lib.recent[-1] if lib.recent != before else -1,
+                "stroke": lib.strokes[lib.recent[-1]].id if lib.recent != before else -1,
                 "t": [p[0] for p in path], "x": [p[1] for p in path], "y": [p[2] for p in path],
                 "at": [[w, *position_at(path, w)] for w in probes],
             })
