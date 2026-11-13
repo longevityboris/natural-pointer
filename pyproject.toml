@@ -1,0 +1,36 @@
+[project]
+name = "natural-pointer"
+version = "0.2.0"
+description = "Move the pointer the way a recorded human hand moved it"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.md"]
+authors = [{ name = "Boris Djordjevic" }]
+requires-python = ">=3.10"
+# Stroke replay (NaturalPointer.path) needs the standard library only.
+dependencies = []
+
+[project.optional-dependencies]
+control = ["pyautogui>=0.9.54"]                    # move_to / click on this machine
+record = ["pyautogui>=0.9.54", "pynput>=1.8"]      # record your own strokes
+model = ["torch>=2.6"]                             # the retired next-point network
+all = ["pyautogui>=0.9.54", "pynput>=1.8", "torch>=2.6", "numpy>=2", "matplotlib>=3.9"]
+
+[project.urls]
+Repository = "https://github.com/longevityboris/natural-pointer"
+
+[project.scripts]
+natural-pointer-strokes = "natural_pointer.strokes:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "numpy>=2", "matplotlib>=3.9"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["natural_pointer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
