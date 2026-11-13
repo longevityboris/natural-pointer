@@ -137,4 +137,4 @@ def test_the_recording_gives_the_shipped_library():
     for s in built["strokes"]:
         assert s["t"][0] == 0 and s["t"] == sorted(s["t"])
         assert (s["a"][0], s["b"][0], s["b"][-1]) == (0, 0, 0)
-        assert s["a"][-1] == round(s["dist"] * 10)
+        assert s["a"][-1] == round(s["meta"]["dist"] * 10) and s["a"][-1] >= 40

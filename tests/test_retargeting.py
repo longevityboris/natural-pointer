@@ -53,6 +53,7 @@ def test_retargeting_keeps_the_strokes_shape_and_timing():
     # one stroke: a bow of 10 to the left of travel with a hesitation in the middle
     stroke = Stroke(0, 100.0, 0.0, [0.0, 0.1, 0.3, 0.4], [0.0, 40.0, 60.0, 100.0], [0.0, -10.0, -10.0, 0.0])
     lib = StrokeLibrary([stroke], {"a": 0.4, "b": 0.0}, seed=9)
+    assert lib.to_json()["strokes"][0]["a"] == [0, 400, 600, 1000]
     path = lib.path((0, 0), (0, 200))            # twice as long, turned a quarter turn
     pace = path[-1][0] / 0.4
     assert 0.93 <= pace <= 1.09
@@ -96,7 +97,7 @@ def test_position_at_runs_straight_between_samples():
 
 def test_dwell_is_one_of_the_recorded_waits():
     lib = StrokeLibrary.load(seed=4)
-    waits = {s.meta["dwell"] for s in lib.strokes if "dwell" in s.meta}
+    waits = {s.dwell for s in lib.strokes if s.dwell is not None}
     assert len(waits) > 20
     assert all(lib.dwell() in waits for _ in range(30))
 

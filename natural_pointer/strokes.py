@@ -239,6 +239,7 @@ class Stroke:
     t: list[float]     # s from the start
     a: list[float]     # points along the chord: 0 at the start, dist at the end
     b: list[float]     # points across the chord
+    dwell: Optional[float] = None  # s it then rested before a click, if a click ended it
     meta: dict = field(default_factory=dict)
 
     @property
@@ -252,19 +253,18 @@ def normalise(s: RawStroke, id: int) -> Stroke:
     dx, dy = s.x[-1] - s.x[0], s.y[-1] - s.y[0]
     stroke = Stroke(
         id=id,
-        dist=round(s.chord, 1),
-        angle=round(math.atan2(dy, dx), 4),
+        dist=round(s.chord * 10) / 10,
+        angle=round(math.atan2(dy, dx) * 1e4) / 1e4,
         t=[round(v * 1e4) / 1e4 for v in s.t],
         a=[round(v * 10) / 10 for v in a],
         b=[round(v * 10) / 10 for v in b],
+        dwell=None if s.dwell is None else round(s.dwell * 1e4) / 1e4,
     )
     stroke.a[0] = stroke.b[0] = stroke.b[-1] = 0.0
     stroke.a[-1] = stroke.dist
     stroke.meta = describe(stroke)
     stroke.meta["clicked"] = s.clicked
     stroke.meta["parts"] = s.parts
-    if s.dwell is not None:
-        stroke.meta["dwell"] = round(s.dwell, 4)
     return stroke
 
 
@@ -313,7 +313,8 @@ def describe(s: Stroke) -> dict:
     )
     bow = max(s.b, key=abs)
     return {
-        "dur": round(s.duration, 4),
+        "dist": s.dist,                                      # points
+        "dur": round(s.duration, 4),                         # s
         "peak": round(peak, 1),                              # points/s
         "peak_at": round(speed.index(peak) / max(1, len(speed) - 1), 3),
         "straight": round(s.dist / path, 4),                 # chord / path length
@@ -380,26 +381,28 @@ class StrokeLibrary:
         self.rng = SplitMix64(seed)
         self.recent: list[int] = []
 
-    # -- file format: integers only, so every reader sees the same numbers --
+    # -- file format --
+    # What a reader needs to replay a stroke is whole numbers, so every reader
+    # sees the same values: the chord length is the last ``a``. ``meta`` is
+    # there to be read by people and by the analysis.
 
     def to_json(self) -> dict:
+        def one(s: Stroke) -> dict:
+            out = {"id": s.id, "angle": round(s.angle * 1e4)}
+            if s.dwell is not None:
+                out["dwell"] = round(s.dwell * 1e4)
+            out["meta"] = s.meta
+            out["t"] = [round(v * 1e4) for v in s.t]
+            out["a"] = [round(v * 10) for v in s.a]
+            out["b"] = [round(v * 10) for v in s.b]
+            return out
+
         return {
             "version": 1,
             "screen": list(self.screen),
-            "units": {"t": "1e-4 s", "a": "0.1 pt", "b": "0.1 pt", "dist": "pt", "angle": "rad"},
+            "units": {"t": "1e-4 s", "a": "0.1 pt", "b": "0.1 pt", "angle": "1e-4 rad", "dwell": "1e-4 s"},
             "fit": self.fit,
-            "strokes": [
-                {
-                    "id": s.id,
-                    "dist": s.dist,
-                    "angle": s.angle,
-                    "meta": s.meta,
-                    "t": [round(v * 1e4) for v in s.t],
-                    "a": [round(v * 10) for v in s.a],
-                    "b": [round(v * 10) for v in s.b],
-                }
-                for s in self.strokes
-            ],
+            "strokes": [one(s) for s in self.strokes],
         }
 
     def save(self, path: str) -> None:
@@ -414,11 +417,12 @@ class StrokeLibrary:
         strokes = [
             Stroke(
                 id=s["id"],
-                dist=float(s["dist"]),
-                angle=float(s["angle"]),
+                dist=s["a"][-1] / 10,
+                angle=s["angle"] / 1e4,
                 t=[v / 1e4 for v in s["t"]],
                 a=[v / 10 for v in s["a"]],
                 b=[v / 10 for v in s["b"]],
+                dwell=s["dwell"] / 1e4 if "dwell" in s else None,
                 meta=s.get("meta", {}),
             )
             for s in doc["strokes"]
@@ -450,7 +454,7 @@ class StrokeLibrary:
 
     def dwell(self) -> float:
         """Seconds to rest on the target before pressing: one of the recorded waits."""
-        waits = [s.meta["dwell"] for s in self.strokes if "dwell" in s.meta]
+        waits = [s.dwell for s in self.strokes if s.dwell is not None]
         if not waits:
             return 0.05
         return waits[int(self.rng.unit() * len(waits))]
