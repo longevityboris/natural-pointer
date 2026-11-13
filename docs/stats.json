@@ -1,0 +1,118 @@
+{
+ "recording": {
+  "events": 19306,
+  "moves": 11788,
+  "seconds": 512.0,
+  "screen": [
+   1800,
+   1169
+  ]
+ },
+ "strokes": {
+  "cut": 297,
+  "kept": 241,
+  "samples_kept": 8547,
+  "ended_in_click": 54,
+  "with_correction_after_a_stop": 19
+ },
+ "distance_pt": [
+  18.8,
+  62.1,
+  207.0,
+  351.7,
+  585.9
+ ],
+ "duration_s": [
+  0.1288,
+  0.1695,
+  0.2414,
+  0.3956,
+  0.6539
+ ],
+ "peak_speed_pt_s": [
+  238.8,
+  567.7,
+  1786.8,
+  3838.7,
+  6250.8
+ ],
+ "duration_fit": {
+  "a": -0.01049,
+  "b": 0.04759,
+  "r2": 0.1218
+ },
+ "peak_speed_power_law": {
+  "exponent": 0.91,
+  "r2": 0.925
+ },
+ "time_of_peak_speed": [
+  0.134,
+  0.256,
+  0.389,
+  0.545,
+  0.677
+ ],
+ "straightness": [
+  0.8855,
+  0.9541,
+  0.9824,
+  0.9925,
+  0.9972
+ ],
+ "bow_abs": [
+  0.0167,
+  0.0299,
+  0.0504,
+  0.0876,
+  0.1338
+ ],
+ "bow_left_share": 0.531,
+ "overshoot": {
+  "share": 0.095,
+  "pt": [
+   3.54,
+   6.05,
+   13.6,
+   17.95,
+   22.76
+  ]
+ },
+ "submovements": {
+  "1": 199,
+  "2": 31,
+  "3": 11
+ },
+ "hesitation_share": 0.274,
+ "sideways_tremor_pt_rms": [
+  0.077,
+  0.118,
+  0.2495,
+  0.5019,
+  0.928
+ ],
+ "dwell_before_click_s": [
+  0.0161,
+  0.017,
+  0.0373,
+  0.0887,
+  0.1908
+ ],
+ "click_hold_s": [
+  0.0873,
+  0.0958,
+  0.1122,
+  0.1295,
+  0.1513
+ ],
+ "rest_between_strokes_s": [
+  0.0263,
+  0.1538,
+  0.3139,
+  0.7955,
+  2.1154
+ ],
+ "tremor_spectrum": {
+  "hand_over_glide_8_40_hz": 139.4,
+  "strokes": 86
+ }
+}

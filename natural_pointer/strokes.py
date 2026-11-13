@@ -34,7 +34,7 @@ CORRECTION_GAP = 0.450  # a stop shorter than this may be followed by a correcti
 CORRECTION_SHARE = 0.35  # ...if that next move is small next to the main one
 CORRECTION_MAX = 60.0   # ...and no longer than this many points on its own
 REPORT = 0.008         # s between two reports of the recording mouse
-STRAIGHT = 0.6         # start -> end distance / path length below this: not one aimed move
+STRAIGHT = 0.75        # start -> end distance / path length below this: not one aimed move
 NEAR_REST = 40.0       # points/s: under a third of a point a report, the hand has all but stopped
 
 
@@ -210,8 +210,8 @@ def clean(strokes: Iterable[RawStroke], screen: tuple[float, float] = RECORDED_S
         if chord / s.path_length < STRAIGHT:
             continue  # wandering, not aiming
         a, b = _to_frame(s)
-        if min(a) < -0.25 * chord or max(a) > 1.5 * chord or max(abs(v) for v in b) > 0.4 * chord:
-            continue
+        if min(a) < -0.08 * chord or max(a) > 1.3 * chord or max(abs(v) for v in b) > 0.25 * chord:
+            continue  # backs away first, flies far past, or swings wide: odd when aimed elsewhere
         kept.append(s)
     return kept
 
