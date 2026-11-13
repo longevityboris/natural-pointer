@@ -57,7 +57,7 @@ def check_dependencies():
         print("\nPlease install the missing packages using one of these methods:")
         print(f"  pip install {' '.join(missing_packages)}")
         print("\nOr install all requirements with:")
-        print("  pip install -r requirements.txt")
+        print('  pip install "natural-pointer[all]"')
         sys.exit(1)
 
 # Check dependencies before continuing

@@ -24,7 +24,8 @@ def main():
     print("\nDemonstrating natural mouse movements:")
     
     # Move to center of screen
-    screen_width, screen_height = pointer.simulator.screen_width, pointer.simulator.screen_height
+    info = pointer.get_info()
+    screen_width, screen_height = info["screen_width"], info["screen_height"]
     center_x, center_y = screen_width // 2, screen_height // 2
     
     print(f"Moving to center: ({center_x}, {center_y})")
