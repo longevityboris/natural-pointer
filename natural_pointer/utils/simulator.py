@@ -2,18 +2,63 @@
 Mouse movement simulation using trained neural network models.
 """
 
-import torch
-import numpy as np
-import pyautogui
 import time
 import random
 import math
-# from collections import deque # Unused
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional
 import os
-# import json # Unused
 
-from ..models.neural_network import MouseMovementNN
+
+def bezier_path(start_x: float, start_y: float, end_x: float, end_y: float,
+                steps: int = 20) -> List[Dict[str, float]]:
+    """
+    A path along a random bezier curve with eased timing: the fallback when
+    there is no stroke library. Needs the standard library only.
+
+    Returns a list of points {'x', 'y', 'time' (ms since the previous point), 'type'}.
+    """
+    # Number of control points based on distance
+    distance = math.sqrt((end_x - start_x)**2 + (end_y - start_y)**2)
+    num_control_points = min(5, max(2, int(distance / 300)))
+
+    control_points = [(start_x, start_y)]
+    for i in range(num_control_points):
+        # Base point on the direct line, with randomness that shrinks towards the target
+        progress = (i + 1) / (num_control_points + 1)
+        x = start_x + (end_x - start_x) * progress
+        y = start_y + (end_y - start_y) * progress
+        variance = 0.2 * (1 - progress)
+        control_points.append((
+            x + (end_x - start_x) * random.uniform(-variance, variance),
+            y + (end_y - start_y) * random.uniform(-variance, variance),
+        ))
+    control_points.append((end_x, end_y))
+
+    path = []
+    total_time = 0.5 + (distance / 500)  # Longer for greater distances
+    for k in range(1, steps):
+        t = k / (steps - 1)
+        x, y = _bezier_point(control_points, t)
+        # Slower at start and end (easing)
+        time_factor = 1 - 0.5 * math.sin(t * math.pi)
+        path.append({
+            'x': int(x),
+            'y': int(y),
+            'time': total_time / steps * time_factor * 1000,
+            'type': 'move'
+        })
+    return path
+
+
+def _bezier_point(control_points: List[Tuple[float, float]], t: float) -> Tuple[float, float]:
+    """The point at parameter t (0 to 1) on the bezier curve through control_points."""
+    n = len(control_points) - 1
+    x, y = 0, 0
+    for i, point in enumerate(control_points):
+        factor = math.comb(n, i) * (t ** i) * ((1 - t) ** (n - i))
+        x += point[0] * factor
+        y += point[1] * factor
+    return x, y
 
 class MouseSimulator:
     """
@@ -27,6 +72,9 @@ class MouseSimulator:
         Args:
             model_path: Path to the trained model file. If None, will look for 'mouse_model.pth'.
         """
+        import pyautogui
+        from ..models.neural_network import MouseMovementNN
+
         self.screen_width, self.screen_height = pyautogui.size()
         self.model = MouseMovementNN()
         
@@ -43,6 +91,7 @@ class MouseSimulator:
         """
         try:
             if os.path.exists(self.model_path):
+                import torch
                 self.model.load_state_dict(torch.load(self.model_path))
                 self.model.eval()
                 return True
@@ -126,6 +175,7 @@ class MouseSimulator:
         
         # Use the model to generate the rest of the path
         try:
+            import torch
             with torch.no_grad():
                 for i in range(steps - 5):
                     # Prepare input features from the last 5 points
@@ -216,94 +266,17 @@ class MouseSimulator:
             # Fall back to bezier curve
             return self._generate_bezier_path(start_x, start_y, end_x, end_y, steps)
     
-    def _generate_bezier_path(self, start_x: float, start_y: float, 
-                             end_x: float, end_y: float, 
-                             steps: int = 20) -> List[Dict[str, float]]:
-        """
-        Fallback method to generate path using bezier curves when model fails.
-        
-        Args:
-            start_x, start_y: Starting coordinates.
-            end_x, end_y: Target coordinates.
-            steps: Number of steps in the path.
-            
-        Returns:
-            List of path points.
-        """
-        # Number of control points based on distance
-        distance = math.sqrt((end_x - start_x)**2 + (end_y - start_y)**2)
-        num_control_points = min(5, max(2, int(distance / 300)))
-        
-        # Generate control points
-        control_points = [(start_x, start_y)]
-        
-        for i in range(num_control_points):
-            # Position along the path
-            progress = (i + 1) / (num_control_points + 1)
-            
-            # Base point on the direct line
-            x = start_x + (end_x - start_x) * progress
-            y = start_y + (end_y - start_y) * progress
-            
-            # Add randomness, reducing as we get closer to target
-            variance = 0.2 * (1 - progress)
-            rand_x = x + (end_x - start_x) * random.uniform(-variance, variance)
-            rand_y = y + (end_y - start_y) * random.uniform(-variance, variance)
-            
-            control_points.append((rand_x, rand_y))
-            
-        control_points.append((end_x, end_y))
-        
-        # Generate bezier curve points
-        path = []
-        prev_x, prev_y = start_x, start_y
-        total_time = 0.5 + (distance / 500)  # Longer for greater distances
-        
-        for t in np.linspace(0, 1, steps):
-            # Get point on bezier curve
-            x, y = self._bezier_point(control_points, t)
-            
-            # Calculate timing - slower at start and end (easing)
-            progress = t
-            time_factor = 1 - 0.5 * math.sin(progress * math.pi)
-            point_time = total_time / steps * time_factor * 1000  # Convert to ms
-            
-            # Skip first point
-            if t > 0:
-                path.append({
-                    'x': int(x),
-                    'y': int(y),
-                    'time': point_time,
-                    'type': 'move'
-                })
-            
-            prev_x, prev_y = x, y
-            
-        return path
-    
-    def _bezier_point(self, control_points: List[Tuple[float, float]], 
-                     t: float) -> Tuple[float, float]:
-        """
-        Calculate a point on a bezier curve.
-        
-        Args:
-            control_points: List of control points as (x, y) tuples.
-            t: Parameter value between 0 and 1.
-            
-        Returns:
-            (x, y) coordinates of the point.
-        """
-        n = len(control_points) - 1
-        x, y = 0, 0
-        
-        for i, point in enumerate(control_points):
-            binomial = math.comb(n, i)
-            factor = binomial * (t ** i) * ((1 - t) ** (n - i))
-            x += point[0] * factor
-            y += point[1] * factor
-            
-        return x, y
-    
+    def _generate_bezier_path(self, start_x: float, start_y: float,
+                              end_x: float, end_y: float,
+                              steps: int = 20) -> List[Dict[str, float]]:
+        """Fallback path along a bezier curve when the model fails."""
+        return bezier_path(start_x, start_y, end_x, end_y, steps)
+
+    def _bezier_point(self, control_points: List[Tuple[float, float]],
+                      t: float) -> Tuple[float, float]:
+        """A point on a bezier curve."""
+        return _bezier_point(control_points, t)
+
     def move_to(self, end_x: float, end_y: float, 
                start_x: Optional[float] = None, 
                start_y: Optional[float] = None, 
@@ -319,6 +292,8 @@ class MouseSimulator:
             right_click: Whether to perform a right click after moving.
             double_click: Whether to perform a double click after moving.
         """
+        import pyautogui
+
         # If start not provided, use current position
         if start_x is None or start_y is None:
             start_x, start_y = pyautogui.position()
