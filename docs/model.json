@@ -1,0 +1,52 @@
+{
+ "next_point": {
+  "windows": 10486,
+  "true_step_median_pt": 2.98,
+  "position_error": {
+   "boris.pth": {
+    "median_pt": 2.66,
+    "mean_pt": 5.76
+   },
+   "stay where it is": {
+    "median_pt": 2.98,
+    "mean_pt": 7.67
+   },
+   "repeat the last step": {
+    "median_pt": 0.73,
+    "mean_pt": 2.75
+   }
+  },
+  "interval_error_ms": {
+   "boris.pth": 6.97,
+   "always 8 ms": 0.2
+  },
+  "intervals_guessed_zero_or_negative": 0.007
+ },
+ "paths": {
+  "recorded strokes": {
+   "duration": 0.241,
+   "reports": 29.0,
+   "largest_step": 0.1,
+   "last_step": 0.006,
+   "arrives": 0.768,
+   "backward_time": 0.0
+  },
+  "boris.pth": {
+   "duration": 1.086,
+   "reports": 14.0,
+   "largest_step": 0.561,
+   "last_step": 0.035,
+   "arrives": 0.315,
+   "backward_time": 0.0
+  },
+  "the same code with untrained weights": {
+   "duration": 1.975,
+   "reports": 14.0,
+   "largest_step": 2.107,
+   "last_step": 0.847,
+   "arrives": 1.0,
+   "backward_time": 0.136
+  }
+ },
+ "trained_vs_untrained_mean_gap_share_of_distance": 0.572
+}
